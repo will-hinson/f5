@@ -4,6 +4,7 @@ from pathlib import Path
 import pytsk3
 
 from ..devices import Partition
+from .filekey import FileKey
 
 
 class TskFilesystem:
@@ -22,7 +23,7 @@ class TskFilesystem:
         self: "TskFilesystem",
         directory: pytsk3.Directory,
         path: Path = Path("/"),
-    ) -> Generator[tuple[Path, int]]:
+    ) -> Generator[FileKey]:
         """
         Discover files in a filesystem.
         """
@@ -47,12 +48,15 @@ class TskFilesystem:
                     entry_path,
                 )
             else:
-                yield entry_path, entry.info.meta.size
+                yield FileKey(
+                    path=entry_path,
+                    size=entry.info.meta.size,
+                )
 
     def discover_files(
         self: "TskFilesystem",
         root_path: Path = Path("/"),
-    ) -> set[tuple[Path, int]]:
+    ) -> set[FileKey]:
         return set(
             self._walk_files(
                 self._filesystem.open_dir(str(root_path)),

@@ -2,6 +2,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import boto3
 from boto3.exceptions import S3UploadFailedError
 from botocore.exceptions import BotoCoreError, ClientError
 from tenacity import (
@@ -13,6 +14,7 @@ from tenacity import (
 )
 
 from ..devices import Partition
+from .filekey import FileKey
 from .s3config import S3Config
 from .tskfilesystem import TskFilesystem
 from .tskreader import TskReader
@@ -28,23 +30,26 @@ def get_remote_files(
     s3: S3Client,
     config: S3Config,
     partition: Partition,
-) -> set[tuple[Path, int]]:
-    remote_files: set[tuple[Path, int]] = set()
+) -> set[FileKey]:
+    remote_files: set[FileKey] = set()
 
     for page in s3.get_paginator("list_objects_v2").paginate(
         Bucket=config.bucket,
         Prefix=config.get_partition_prefix(partition),
     ):
         for obj in page.get("Contents", []):
+            if "Key" not in obj or "Size" not in obj:
+                continue
+
             remote_files.add(
-                (
-                    (
+                FileKey(
+                    path=(
                         Path("/")
                         / Path(obj["Key"]).relative_to(
                             config.get_partition_prefix(partition)
                         )
                     ),
-                    obj["Size"],
+                    size=obj["Size"],
                 )
             )
 
@@ -62,14 +67,23 @@ def upload_file(
     s3: S3Client,
     partition: Partition,
     filesystem: TskFilesystem,
-    target_file: Path,
+    target_file_key: FileKey,
     config: S3Config,
     callback: UploadProgress,
 ) -> None:
-    with TskReader(filesystem.open(target_file)) as reader:
+    with TskReader(filesystem.open(target_file_key.path)) as reader:
         s3.upload_fileobj(
             reader,
             Bucket=config.bucket,
-            Key=config.get_partition_file_key(partition, target_file),
+            Key=config.get_partition_file_key(
+                partition,
+                target_file_key.path,
+            ),
             Callback=callback,
         )
+
+
+def get_s3_client(config: S3Config) -> S3Client:
+    return boto3.Session(
+        profile_name=config.profile,
+    ).client("s3")

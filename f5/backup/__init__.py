@@ -1,10 +1,8 @@
 import logging
-from pathlib import Path
 from queue import Queue
 from threading import Thread
 from typing import TYPE_CHECKING
 
-import boto3
 import humanize
 import rich
 from rich.console import Console
@@ -19,7 +17,8 @@ from rich.progress import (
 )
 
 from ..devices import Partition
-from .s3 import get_remote_files, upload_file
+from .filekey import FileKey
+from .s3 import get_remote_files, get_s3_client, upload_file
 from .s3config import S3Config
 from .tskfilesystem import TskFilesystem
 from .uploadprogress import UploadProgress
@@ -51,7 +50,7 @@ def _backup_partition(
 ) -> None:
     # discover all the files on the filesystem
     filesystem: TskFilesystem = TskFilesystem(partition=partition)
-    local_files: set[tuple[Path, int]] = filesystem.discover_files()
+    local_files: set[FileKey] = filesystem.discover_files()
     _logger.info(
         "Discovered %s total file%s on %s",
         f"{len(local_files):,}",
@@ -60,17 +59,20 @@ def _backup_partition(
     )
 
     # check which of the objects exist on the remote
-    s3: S3Client = boto3.Session(
-        profile_name=s3_config.profile,
-    ).client("s3")
-    remote_files: set[tuple[Path, int]] = get_remote_files(
+    s3: S3Client = get_s3_client(s3_config)
+    remote_files: set[FileKey] = get_remote_files(
         s3,
         config=s3_config,
         partition=partition,
     )
 
-    target_files: set[tuple[Path, int]] = local_files - remote_files
-    total_size: int = sum(entry[1] for entry in target_files)
+    target_files: set[FileKey] = local_files - remote_files
+    total_size: int = sum(
+        map(
+            lambda file_key: file_key.size,
+            target_files,
+        )
+    )
     _logger.info(
         "Found %s file%s to sync from %s to remote storage (%s)",
         f"{len(target_files)}",
@@ -88,16 +90,16 @@ def _backup_partition(
             total=total_size,
         )
 
-        for index, (target_file, target_file_size) in enumerate(target_files):
+        for index, target_file_key in enumerate(target_files):
             file_task: TaskID = progress.add_task(
-                f"{index}/{len(target_files)} {target_file.name}",
-                total=target_file_size,
+                f"{index}/{len(target_files)} {target_file_key.path.name}",
+                total=target_file_key.size,
             )
             _logger.info(
                 "Uploading %s of size %s from %s (%s/%s)",
-                target_file.as_posix(),
+                target_file_key.path.as_posix(),
                 humanize.naturalsize(
-                    target_file_size,
+                    target_file_key.size,
                     binary=True,
                 ),
                 partition.device.device_node,
@@ -109,7 +111,7 @@ def _backup_partition(
                 s3,
                 partition=partition,
                 filesystem=filesystem,
-                target_file=target_file,
+                target_file_key=target_file_key,
                 config=s3_config,
                 callback=UploadProgress(
                     progress,
