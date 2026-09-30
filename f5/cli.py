@@ -20,7 +20,7 @@ _logger: logging.Logger = logging.getLogger(__name__)
     help="Exclude a specific block device",
     required=False,
     type=click.Path(
-        exists=True,
+        exists=False,
         file_okay=True,
         dir_okay=False,
         readable=False,
@@ -33,7 +33,7 @@ _logger: logging.Logger = logging.getLogger(__name__)
     help="Include a specific block device",
     required=False,
     type=click.Path(
-        exists=True,
+        exists=False,
         file_okay=True,
         dir_okay=False,
         readable=True,
@@ -82,8 +82,6 @@ def cli(
     f5 - Automatic backups to S3-compatible storage
     """
 
-    # TODO: Implement logic to handle include_device and exclude_device options
-
     setup_logging()
 
     # start a monitor thread to watch for new partitions
@@ -101,6 +99,8 @@ def cli(
             partition_queue=partition_queue,
             config=MonitorConfig(
                 allow_fixed=allow_fixed,
+                include_devices=set(include_device),
+                exclude_devices=set(exclude_device),
             ),
         ),
     ]
