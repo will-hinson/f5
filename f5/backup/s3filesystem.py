@@ -6,8 +6,11 @@ import boto3
 from boto3.exceptions import S3UploadFailedError
 from botocore.exceptions import BotoCoreError, ClientError
 from tenacity import (
+    RetryCallState,
     before_sleep_log,
     retry,
+    retry_base,
+    retry_if_exception,
     retry_if_exception_type,
     stop_after_attempt,
     wait_exponential,
@@ -26,6 +29,12 @@ if TYPE_CHECKING:
 
 
 _logger: logging.Logger = logging.getLogger(__name__)
+
+
+class _retry_unless_partition_removed(retry_base):
+    def __call__(self, retry_state: RetryCallState) -> bool:
+        partition: Partition = retry_state.kwargs["partition"]
+        return not partition.removed.is_set()
 
 
 class S3Filesystem:
@@ -71,8 +80,9 @@ class S3Filesystem:
     @retry(
         stop=stop_after_attempt(5),
         wait=wait_exponential(multiplier=2, max=60),
-        retry=retry_if_exception_type(
-            (S3UploadFailedError, BotoCoreError, ClientError)
+        retry=(
+            retry_if_exception_type((S3UploadFailedError, BotoCoreError, ClientError))
+            & _retry_unless_partition_removed()
         ),
         before_sleep=before_sleep_log(_logger, logging.WARNING),
         reraise=True,
@@ -84,13 +94,28 @@ class S3Filesystem:
         file_key: FileKey,
         callback: UploadProgress | None = None,
     ) -> None:
-        with TskReader(filesystem.open(file_key.path)) as reader:
+        partition.check_removed()
+
+        s3_key: str = self._config.get_partition_file_key(
+            partition,
+            file_key.path,
+        )
+
+        with TskReader(
+            filesystem.open(file_key.path),
+            cancel_event=partition.removed,
+        ) as reader:
             self._client.upload_fileobj(
                 reader,  # type: ignore
                 Bucket=self._config.bucket,
-                Key=self._config.get_partition_file_key(
-                    partition,
-                    file_key.path,
-                ),
+                Key=s3_key,
                 Callback=callback,
             )
+
+        # check that the file actually exists. head_object() will raise
+        # ClientError for us if the file doesn't exist which @retry
+        # will catch
+        self._client.head_object(
+            Bucket=self._config.bucket,
+            Key=s3_key,
+        )

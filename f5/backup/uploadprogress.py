@@ -16,12 +16,20 @@ class UploadProgress:
     def __call__(self, n: int) -> None:
         with self._lock:
             self._sent += n
-        self._progress.advance(self._task, n)
-        self._progress.advance(self._overall, n)
+
+        try:
+            self._progress.advance(self._task, n)
+            self._progress.advance(self._overall, n)
+        except KeyError:
+            ...
 
     def reset(self) -> None:
         """Undo this file's contribution before a retry."""
         with self._lock:
             sent, self._sent = self._sent, 0
-        self._progress.advance(self._overall, -sent)
-        self._progress.reset(self._task)
+
+        try:
+            self._progress.advance(self._overall, -sent)
+            self._progress.reset(self._task)
+        except KeyError:
+            ...

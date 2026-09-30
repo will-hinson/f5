@@ -1,8 +1,10 @@
 import io
-from threading import Lock
+from threading import Event, Lock
 from typing import Annotated, override, TYPE_CHECKING
 
 import pytsk3
+
+from ..backup import PartitionRemoved
 
 if TYPE_CHECKING:
     from _typeshed import MaybeNone, WriteableBuffer
@@ -16,11 +18,15 @@ class TskReader(io.RawIOBase):
     _file: pytsk3.File
     _size: int
     _position: int
+    _cancel_event: Event | None
 
-    def __init__(self: "TskReader", file: pytsk3.File) -> None:
+    def __init__(
+        self: "TskReader", file: pytsk3.File, cancel_event: Event | None = None
+    ) -> None:
         self._file = file
         self._size = file.info.meta.size
         self._position = 0
+        self._cancel_event = cancel_event
 
     @override
     def readable(self: "TskReader") -> bool:
@@ -45,6 +51,9 @@ class TskReader(io.RawIOBase):
 
     @override
     def readinto(self, buffer: WriteableBuffer, /) -> int | MaybeNone:
+        if self._cancel_event is not None and self._cancel_event.is_set():
+            raise PartitionRemoved("Partition was removed during read operation")
+
         # get the target number of bytes for this read. it's either the
         # remaining bytes available of length of the target buffer,
         # whichever's smaller

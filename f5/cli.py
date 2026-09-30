@@ -5,7 +5,7 @@ from threading import Thread
 import click
 
 from .backup import make_backup_thread, S3Config
-from .devices import Partition, make_monitor_thread
+from .devices import MonitorConfig, Partition, make_monitor_thread
 from .logging import setup_logging
 
 
@@ -62,6 +62,13 @@ _logger: logging.Logger = logging.getLogger(__name__)
     type=str,
     default="f5",
 )
+@click.option(
+    "--allow-fixed/--no-allow-fixed",
+    help="Allow partitions from fixed devices to be backed up",
+    required=False,
+    type=bool,
+    default=False,
+)
 @click.version_option()
 def cli(
     include_device: tuple[str, ...],
@@ -69,6 +76,7 @@ def cli(
     profile: str,
     bucket: str,
     prefix: str,
+    allow_fixed: bool,
 ) -> None:
     """
     f5 - Automatic backups to S3-compatible storage
@@ -89,7 +97,12 @@ def cli(
                 prefix=prefix,
             ),
         ),
-        make_monitor_thread(partition_queue=partition_queue),
+        make_monitor_thread(
+            partition_queue=partition_queue,
+            config=MonitorConfig(
+                allow_fixed=allow_fixed,
+            ),
+        ),
     ]
     for thread in threads:
         thread.start()

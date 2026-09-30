@@ -15,7 +15,7 @@ from rich.progress import (
     TaskID,
 )
 
-from ..devices import Partition
+from ..devices import Partition, PartitionRemoved
 from .filekey import FileKey
 from .s3config import S3Config
 from .s3filesystem import S3Filesystem
@@ -87,33 +87,42 @@ def _upload_with_progress(
     s3: S3Filesystem,
     tsk: TskFilesystem,
 ) -> None:
-    file_task: TaskID = progress.add_task(
-        f"{index}/{total_files} {target_file_key.path.name}",
-        total=target_file_key.size,
-    )
-    _logger.info(
-        "Uploading %s of size %s from %s (%s/%s)",
-        target_file_key.path.as_posix(),
-        humanize.naturalsize(
-            target_file_key.size,
-            binary=True,
-        ),
-        partition.device.device_node,
-        index + 1,
-        total_files,
-    )
+    try:
+        file_task: TaskID = progress.add_task(
+            f"{index + 1}/{total_files} {target_file_key.path.name}",
+            total=target_file_key.size,
+        )
+        _logger.info(
+            "Uploading %s of size %s from %s (%s/%s)",
+            target_file_key.path.as_posix(),
+            humanize.naturalsize(
+                target_file_key.size,
+                binary=True,
+            ),
+            partition.device.device_node,
+            index + 1,
+            total_files,
+        )
 
-    s3.upload_partition_file(
-        partition=partition,
-        filesystem=tsk,
-        file_key=target_file_key,
-        callback=UploadProgress(
-            progress,
-            overall_task,
-            file_task,
-        ),
-    )
-    progress.remove_task(file_task)
+        s3.upload_partition_file(
+            partition=partition,
+            filesystem=tsk,
+            file_key=target_file_key,
+            callback=UploadProgress(
+                progress,
+                overall_task,
+                file_task,
+            ),
+        )
+        progress.remove_task(file_task)
+
+    finally:
+        # always remove any remaining task entries to clear the console up
+        for task_id in list(progress.task_ids):
+            try:
+                progress.remove_task(task_id)
+            except KeyError:
+                ...
 
 
 def _backup_partition(
@@ -131,7 +140,15 @@ def _backup_partition(
             total=total_size,
         )
 
-        for index, target_file_key in enumerate(target_files):
+        for index, target_file_key in enumerate(
+            sorted(
+                # iterate over all of the file in reverse size order, starting
+                # with the largest file first
+                target_files,
+                key=lambda file_key: file_key.size,
+                reverse=True,
+            )
+        ):
             _upload_with_progress(
                 progress=progress,
                 s3=s3,
@@ -143,7 +160,10 @@ def _backup_partition(
                 overall_task=overall_task,
             )
 
-        progress.remove_task(overall_task)
+        try:
+            progress.remove_task(overall_task)
+        except KeyError:
+            ...
 
 
 def make_backup_thread(
@@ -160,16 +180,30 @@ def make_backup_thread(
             if partition is None:
                 break
 
-            _backup_partition(
-                partition,
-                s3_config=s3_config,
-            )
-
-            _logger.info(
-                "Partition %s of device %s is fully backed up",
-                partition.device.device_node,
-                partition.parent_device.device_node,
-            )
+            partition_name: str = partition.device.device_node
+            try:
+                partition.check_removed()
+                _backup_partition(
+                    partition,
+                    s3_config=s3_config,
+                )
+            except (PartitionRemoved, OSError) as exc:
+                if isinstance(exc, OSError) and not partition.removed.is_set():
+                    _logger.exception(f"Backup of partition {partition_name} failed")
+                else:
+                    _logger.warning(
+                        f"Backup of partition {partition_name} stopped: device removed"
+                    )
+            except Exception:
+                _logger.exception(f"Backup of partition {partition_name} failed")
+            else:
+                _logger.info(
+                    "Partition %s of device %s is fully backed up",
+                    partition.device.device_node,
+                    partition.parent_device.device_node,
+                )
+            finally:
+                partition_queue.task_done()
 
     return Thread(
         target=backup_worker,
