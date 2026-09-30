@@ -1,6 +1,6 @@
 [project]
 name = "f5-backup"
-version = "0.1.0"
+version = "0.2.0"
 description = "Automatic backups to S3-compatible storage"
 authors = [
     {name = "Will Hinson",email = "will@hinson.sh"}

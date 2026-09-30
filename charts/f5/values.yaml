@@ -1,5 +1,4 @@
 image:
-  # set this to your Docker Hub namespace
   repository: willhinson3/f5
   # defaults to the chart's appVersion
   tag: ""
@@ -59,7 +58,10 @@ nodeExclusion:
 # optional opt-in mode, e.g. {f5.hinson.sh/enabled: "true"}
 nodeSelector: {}
 
-# DaemonSets skip tainted nodes (commonly control-plane nodes) by default
+# also run on control-plane nodes (tolerates their NoSchedule taint)
+allowControlPlanes: false
+
+# extra tolerations; DaemonSets skip nodes with taints they don't tolerate
 tolerations: []
 # tolerations:
 #   - key: node-role.kubernetes.io/control-plane

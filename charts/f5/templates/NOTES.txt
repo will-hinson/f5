@@ -21,10 +21,9 @@ Exclude a node:
 Re-include it:
   kubectl label node <node> {{ .Values.nodeExclusion.labelKey }}-
 {{- end }}
-{{- if not .Values.tolerations }}
+{{- if not .Values.allowControlPlanes }}
 
-Nodes with NoSchedule taints (often control-plane nodes) are skipped. Set
-`tolerations` in your values to run there too.
+Control-plane nodes are skipped. Set `allowControlPlanes: true` to run there too.
 {{- end }}
 
 Backups go to s3://{{ .Values.s3.bucket }}/{{ .Values.s3.prefix }}

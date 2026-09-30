@@ -15,6 +15,7 @@ from rich.progress import (
     TaskID,
 )
 
+from ..console import console
 from ..devices import Partition, PartitionRemoved
 from .filekey import FileKey
 from .s3config import S3Config
@@ -27,8 +28,6 @@ _logger: logging.Logger = logging.getLogger(__name__)
 
 
 def _make_progress() -> Progress:
-    console: Console = rich.get_console()
-
     return Progress(
         TextColumn("[bold]{task.description}", justify="right"),
         BarColumn(),
