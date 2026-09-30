@@ -84,7 +84,8 @@ def cli(
 
     setup_logging()
 
-    # start a monitor thread to watch for new partitions
+    # start a monitor thread to watch for new partitions and a
+    # backup thread to handle backups of those partitions
     partition_queue: Queue[Partition] = Queue()
     threads: list[Thread] = [
         make_backup_thread(
