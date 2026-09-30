@@ -10,6 +10,23 @@ from ..devices import Partition
 _logger: logging.Logger = logging.getLogger(__name__)
 
 
+def _get_device_names(device: pyudev.Device) -> set[str]:
+    """All names a config entry might use to refer to this device."""
+
+    # get all of /dev/disk/by-{id,path,uuid,partuuid,label}/...
+    names: set[str] = set(device.device_links)
+
+    if device.device_node:
+        names.add(device.device_node)  # /dev/sdb, /dev/sdb1
+
+    # add the ID_PATH if it exists which is a unique identifier for the port
+    # the device is on
+    if id_path := device.properties.get("ID_PATH"):
+        names.add(id_path)  # pci-0000:00:14.0-usb-0:1:1.0-scsi-0:0:0:0
+
+    return names
+
+
 class MonitorWorker(Thread):
     _active_partitions: dict[str, Partition]
     _config: MonitorConfig
@@ -53,14 +70,20 @@ class MonitorWorker(Thread):
         observer.join()
 
     def _device_included(self: "MonitorWorker", *devices: pyudev.Device | None) -> bool:
-        names = {d.device_node for d in devices if d is not None and d.device_node}
+        # collate all of the names for the given devices into a single set
+        device_names: set[str] = set()
+        for device in devices:
+            if device is not None:
+                device_names |= _get_device_names(device)
 
-        include = self._config.include_devices
-        exclude = self._config.exclude_devices
-
-        if include and names.isdisjoint(include):
+        # if the include list is non-empty, then the device must be in it to be included
+        if self._config.include_devices and device_names.isdisjoint(
+            self._config.include_devices
+        ):
             return False
-        return names.isdisjoint(exclude)
+
+        # otherwise, check that the device is not in the exclude list
+        return device_names.isdisjoint(self._config.exclude_devices)
 
     def _handle_device(self: "MonitorWorker", device: pyudev.Device) -> None:
         # ignore things that aren't partitions with filesystems
