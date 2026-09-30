@@ -1,0 +1,131 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "f5.fullname" . }}
+  labels:
+    {{- include "f5.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "f5.selectorLabels" . | nindent 6 }}
+  {{- with .Values.updateStrategy }}
+  updateStrategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  template:
+    metadata:
+      annotations:
+        # restart pods when chart-managed AWS config changes
+        checksum/aws-secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "f5.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      # udev events are only delivered in the host network namespace
+      hostNetwork: true
+      dnsPolicy: {{ .Values.dnsPolicy }}
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: {{ .Values.nodeExclusion.labelKey | quote }}
+                    operator: NotIn
+                    values:
+                      - {{ .Values.nodeExclusion.labelValue | quote }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: f5
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - {{ printf "--bucket=%s" (required "s3.bucket is required" .Values.s3.bucket) | quote }}
+            - {{ printf "--prefix=%s" .Values.s3.prefix | quote }}
+            {{- with .Values.s3.profile }}
+            - {{ printf "--profile=%s" . | quote }}
+            {{- end }}
+            - {{ ternary "--allow-fixed" "--no-allow-fixed" .Values.devices.allowFixed }}
+            {{- range .Values.devices.include }}
+            - {{ printf "--include-device=%s" . | quote }}
+            {{- end }}
+            {{- range .Values.devices.exclude }}
+            - {{ printf "--exclude-device=%s" . | quote }}
+            {{- end }}
+            {{- with .Values.extraArgs }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          env:
+            {{- if include "f5.awsSecretEnabled" . }}
+            - name: AWS_CONFIG_FILE
+              value: /etc/f5/aws/config
+            - name: AWS_SHARED_CREDENTIALS_FILE
+              value: /etc/f5/aws/credentials
+            {{- end }}
+            {{- if include "f5.awsCaBundleEnabled" . }}
+            - name: AWS_CA_BUNDLE
+              value: /etc/f5/aws/ca-bundle.pem
+            {{- end }}
+            {{- with .Values.s3.endpointUrl }}
+            - name: AWS_ENDPOINT_URL_S3
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.s3.region }}
+            - name: AWS_DEFAULT_REGION
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          securityContext:
+            # raw block device reads, new device nodes, and sysfs tuning
+            privileged: true
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: dev
+              mountPath: /dev
+            - name: udev
+              mountPath: /run/udev
+              readOnly: true
+            {{- if include "f5.awsSecretEnabled" . }}
+            - name: aws
+              mountPath: /etc/f5/aws
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: dev
+          hostPath:
+            path: /dev
+            type: Directory
+        - name: udev
+          hostPath:
+            path: /run/udev
+            type: Directory
+        {{- if include "f5.awsSecretEnabled" . }}
+        - name: aws
+          secret:
+            secretName: {{ include "f5.awsSecretName" . }}
+        {{- end }}

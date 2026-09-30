@@ -1,0 +1,13 @@
+apiVersion: v2
+name: f5
+description: Automatic backups of removable media to S3-compatible storage
+
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+
+keywords:
+  - backup
+  - s3
+  - sd-card
+  - homelab

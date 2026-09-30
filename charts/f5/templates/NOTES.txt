@@ -1,0 +1,36 @@
+{{- $exclude := printf "%s=%s" .Values.nodeExclusion.labelKey .Values.nodeExclusion.labelValue -}}
+{{- if .Values.nodeSelector }}
+f5 is running in opt-in mode: only on nodes labelled
+{{- range $key, $value := .Values.nodeSelector }}
+  {{ $key }}={{ $value }}
+{{- end }}
+and not labelled {{ $exclude }}.
+
+Enable a node:
+  kubectl label node <node>{{ range $key, $value := .Values.nodeSelector }} {{ $key }}={{ $value }}{{ end }}
+
+Disable it again:
+  kubectl label node <node>{{ range $key, $value := .Values.nodeSelector }} {{ $key }}-{{ end }}
+{{- else }}
+f5 is running on every schedulable node except those labelled
+  {{ $exclude }}
+
+Exclude a node:
+  kubectl label node <node> {{ $exclude }}
+
+Re-include it:
+  kubectl label node <node> {{ .Values.nodeExclusion.labelKey }}-
+{{- end }}
+{{- if not .Values.tolerations }}
+
+Nodes with NoSchedule taints (often control-plane nodes) are skipped. Set
+`tolerations` in your values to run there too.
+{{- end }}
+
+Backups go to s3://{{ .Values.s3.bucket }}/{{ .Values.s3.prefix }}
+
+See which nodes are running f5:
+  kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/instance={{ .Release.Name }} -o wide
+
+Follow logs from all nodes:
+  kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/instance={{ .Release.Name }} -f --prefix

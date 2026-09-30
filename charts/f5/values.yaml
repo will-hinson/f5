@@ -1,0 +1,91 @@
+image:
+  # set this to your Docker Hub namespace
+  repository: willhinson3/f5
+  # defaults to the chart's appVersion
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+s3:
+  # required: bucket to back up into
+  bucket: ""
+  # key prefix inside the bucket
+  prefix: f5
+  # AWS profile to use from the mounted config; leave empty to use the
+  # default credential chain (env vars, [default] profile, etc.)
+  profile: ""
+  # optional S3 endpoint for S3-compatible stores (sets AWS_ENDPOINT_URL_S3)
+  endpointUrl: ""
+  # optional region (sets AWS_DEFAULT_REGION)
+  region: ""
+
+devices:
+  # also back up partitions on fixed (non-removable) disks
+  allowFixed: false
+  # device names to include/exclude; any of these forms work:
+  #   /dev/sdb
+  #   /dev/disk/by-id/usb-Generic_STORAGE_DEVICE_000000009744-0:0
+  #   /dev/disk/by-path/pci-0000:00:14.0-usb-0:1:1.0-scsi-0:0:0:0
+  #   pci-0000:00:14.0-usb-0:1:1.0-scsi-0:0:0:0   (bare ID_PATH)
+  #   /dev/disk/by-uuid/3A1F-9C2E
+  include: []
+  exclude: []
+
+aws:
+  # name of an existing Secret with keys `config` and/or `credentials`
+  # (and optionally `ca-bundle.pem`). Recommended over inlining below:
+  #   kubectl create secret generic f5-aws \
+  #     --from-file=config=$HOME/.aws/config \
+  #     --from-file=credentials=$HOME/.aws/credentials
+  existingSecret: ""
+  # set to true if existingSecret contains a `ca-bundle.pem` key
+  existingSecretHasCaBundle: false
+
+  # alternatively, inline file contents and the chart creates the Secret
+  config: ""
+  credentials: ""
+  # PEM contents of a private CA for your S3 endpoint (sets AWS_CA_BUNDLE)
+  caBundle: ""
+
+# run on every node except those with this label
+nodeExclusion:
+  labelKey: f5.hinson.sh/exclude
+  labelValue: "true"
+
+# optional opt-in mode, e.g. {f5.hinson.sh/enabled: "true"}
+nodeSelector: {}
+
+# DaemonSets skip tainted nodes (commonly control-plane nodes) by default
+tolerations: []
+# tolerations:
+#   - key: node-role.kubernetes.io/control-plane
+#     operator: Exists
+#     effect: NoSchedule
+
+# resolve cluster service names (e.g. an in-cluster S3 service) despite hostNetwork
+dnsPolicy: ClusterFirstWithHostNet
+
+resources:
+  requests:
+    cpu: 25m
+    memory: 128Mi
+  limits:
+    memory: 512Mi
+
+updateStrategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxUnavailable: 1
+
+terminationGracePeriodSeconds: 30
+priorityClassName: ""
+
+podAnnotations: {}
+podLabels: {}
+
+extraArgs: []
+extraEnv: []
