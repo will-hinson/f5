@@ -1,3 +1,7 @@
-__all__ = ["cli"]
+__all__ = [
+    "backup",
+    "cli",
+]
 
+from . import backup
 from . import cli

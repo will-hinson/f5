@@ -1,16 +1,14 @@
 from collections.abc import Generator
-import io
 import logging
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from queue import Queue
-from threading import Lock, Thread
-from typing import TYPE_CHECKING, override
+from threading import Thread
+from typing import TYPE_CHECKING
 
 import boto3
 from boto3.exceptions import S3UploadFailedError
 from botocore.exceptions import BotoCoreError, ClientError
 import humanize
-from pydantic import BaseModel
 import pytsk3
 import rich
 from rich.console import Console
@@ -23,7 +21,6 @@ from rich.progress import (
     TimeRemainingColumn,
     TaskID,
 )
-
 from tenacity import (
     before_sleep_log,
     retry,
@@ -32,15 +29,16 @@ from tenacity import (
     wait_exponential,
 )
 
-from .devices import Partition
+from ..devices import Partition
+from .s3config import S3Config
+from .tskreader import TskReader
+from .uploadprogress import UploadProgress
 
 if TYPE_CHECKING:
-    from _typeshed import MaybeNone, WriteableBuffer
     from mypy_boto3_s3 import S3Client
 
 
 _logger: logging.Logger = logging.getLogger(__name__)
-_tsk_lock: Lock = Lock()
 
 
 def _make_progress() -> Progress:
@@ -55,102 +53,6 @@ def _make_progress() -> Progress:
         console=console,
         disable=not console.is_terminal,  # no bars when piped or run under a service
     )
-
-
-class UploadProgress:
-    """boto3 Callback that feeds a per-file task and an overall task."""
-
-    def __init__(self, progress: Progress, overall: TaskID, task: TaskID):
-        self._progress = progress
-        self._overall = overall
-        self._task = task
-        self._sent = 0
-        self._lock = Lock()
-
-    def __call__(self, n: int) -> None:
-        with self._lock:
-            self._sent += n
-        self._progress.advance(self._task, n)
-        self._progress.advance(self._overall, n)
-
-    def reset(self) -> None:
-        """Undo this file's contribution before a retry."""
-        with self._lock:
-            sent, self._sent = self._sent, 0
-        self._progress.advance(self._overall, -sent)
-        self._progress.reset(self._task)
-
-
-class S3Config(BaseModel):
-    profile: str
-    bucket: str
-    prefix: str
-
-    def get_partition_prefix(self: "S3Config", partition: Partition) -> str:
-        return (
-            (PurePosixPath("/") / self.prefix / partition.uuid)
-            .relative_to("/")
-            .as_posix()
-        )
-
-    def get_partition_file_key(
-        self: "S3Config", partition: Partition, file: Path
-    ) -> str:
-        return (
-            PurePosixPath("/") / self.prefix / partition.uuid / file.relative_to("/")
-        ).as_posix()
-
-
-class TskReader(io.RawIOBase):
-    _file: pytsk3.File
-    _size: int
-    _position: int
-
-    def __init__(self: "TskReader", file: pytsk3.File) -> None:
-        self._file = file
-        self._size = file.info.meta.size
-        self._position = 0
-
-    @override
-    def readable(self: "TskReader") -> bool:
-        return True
-
-    @override
-    def seekable(self: "TskReader") -> bool:
-        return True
-
-    def seek(self: "TskReader", offset: int, whence: int = io.SEEK_SET) -> int:
-        match whence:
-            case io.SEEK_SET:
-                self._position = 0 + offset
-            case io.SEEK_CUR:
-                self._position += offset
-            case io.SEEK_END:
-                self._position = self._size
-            case _:
-                raise ValueError(f"Unknown whence value {whence}")
-
-        return self._position
-
-    @override
-    def readinto(self, buffer: WriteableBuffer, /) -> int | MaybeNone:
-        # get the target number of bytes for this read. it's either the
-        # remaining bytes available of length of the target buffer,
-        # whichever's smaller
-        byte_count: int = min(len(buffer), self._size - self._position)
-        if byte_count <= 0:
-            return 0
-
-        # read the bytes with a mutex since pytsk3 isn't threadsafe
-        data: bytes
-        with _tsk_lock:
-            data = self._file.read_random(self._position, byte_count)
-
-        # put the result in the buffer and seek our position ahead
-        buffer[: len(data)] = data
-        self._position += len(data)
-
-        return len(data)
 
 
 def _walk_files(
