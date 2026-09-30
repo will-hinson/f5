@@ -1,5 +1,5 @@
 [project]
-name = "f5"
+name = "f5-backup"
 version = "0.1.0"
 description = "Automatic backups to S3-compatible storage"
 authors = [
@@ -19,6 +19,9 @@ dependencies = [
     "humanize (>=4.16.0,<5.0.0)",
     "tenacity (>=9.1.4,<10.0.0)",
 ]
+
+[tool.poetry]
+packages = [{ include = "f5" }]
 
 [tool.poetry.scripts]
 f5 = "f5.cli:cli"
