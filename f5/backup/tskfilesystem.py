@@ -6,6 +6,22 @@ import pytsk3
 from ..devices import Partition
 from .filekey import FileKey
 
+_VIRTUAL_TYPES = (pytsk3.TSK_FS_META_TYPE_VIRT, pytsk3.TSK_FS_META_TYPE_VIRT_DIR)
+
+
+def _is_real_entry(entry, name: str, at_root: bool) -> bool:
+    if entry.info.name.flags == pytsk3.TSK_FS_NAME_FLAG_UNALLOC:
+        return False  # deleted file
+    meta = entry.info.meta
+    if meta is None or meta.type in _VIRTUAL_TYPES:
+        return False  # $MBR, $FAT1, $FAT2, $OrphanFiles, ...
+    if name.endswith("(Volume Label Entry)"):
+        return False
+    if at_root and name.startswith("$"):
+        return False  # exFAT $ALLOC_BITMAP, $UPCASE_TABLE
+
+    return True
+
 
 class TskFilesystem:
     _partition: Partition
@@ -35,8 +51,8 @@ class TskFilesystem:
             if entry_name in [".", ".."]:
                 continue
 
-            # ignore deleted/unallocated entries with no metadata
-            if entry.info.meta is None:
+            # ignore deleted/unallocated entries with no metadata and TSK virtual files
+            if not _is_real_entry(entry, entry_name, at_root=path == Path("/")):
                 continue
 
             entry_path: Path = path / entry_name
