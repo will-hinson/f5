@@ -38,8 +38,9 @@ FROM python:${PYTHON_VERSION}-slim AS runtime
 
 # libudev1: loaded by pyudev via ctypes
 # libstdc++6: needed by pytsk3's compiled extension
+# tini: runs as PID 1 so SIGTERM reaches f5 and stops it promptly
 RUN apt-get update \
- && apt-get install -y --no-install-recommends libudev1 libstdc++6 \
+ && apt-get install -y --no-install-recommends libudev1 libstdc++6 tini \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -48,4 +49,4 @@ COPY --from=builder /app /app
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1
 
-ENTRYPOINT ["f5"]
+ENTRYPOINT ["/usr/bin/tini", "--", "f5"]
